@@ -1,3 +1,4 @@
+/* -*- Mode: js; js-indent-level: 4; -*- */
 /*
   Copyright (C) 2012 John Freeman <jfreeman08@gmail.com>
   Copyright (C) 2012 Ariya Hidayat <ariya.hidayat@gmail.com>
@@ -35,15 +36,6 @@
 (function (exports) {
     'use strict';
 
-    var sourceMap;
-    if (typeof process !== "undefined") {
-        sourceMap = require("source-map");
-    } else if (typeof snarf !== "undefined") {
-        load("./source-map.js");
-    } else {
-        document.write("./source-map.js");
-    }
-
     var Syntax,
         Precedence,
         BinaryPrecedence,
@@ -53,7 +45,8 @@
         base,
         indent,
         extra,
-        parse;
+        parse,
+        Result;
 
     Syntax = {
         AssignmentExpression: 'AssignmentExpression',
@@ -116,7 +109,7 @@
         Postfix: 14,
         Call: 15,
         New: 16,
-		Member: 17,
+        Member: 17,
         Primary: 18
     };
 
@@ -161,7 +154,7 @@
                 }
             },
             sourceFile: '',
-            sourceMap: false
+            sourceMap: null
         };
     }
 
@@ -304,7 +297,14 @@
     }
 
     function addIndent(stmt) {
-        return base + stmt;
+        if (extra.sourceMap) {
+            stmt.children.unshift(base);
+        } else if (typeof stmt === 'string') {
+            return base + stmt;
+        } else {
+            stmt.string = base + stmt.string;
+            return stmt;
+        }
     }
 
     function adjustMultilineComment(value) {
@@ -359,16 +359,8 @@
 
     function maybeBlock(stmt, suffix) {
         var previousBase, result;
-        var line = null;
-        var column = null;
-        var source = '';
 
-        if (typeof stmt.loc !== 'undefined') {
-            line = stmt.loc.start.line;
-            column = stmt.loc.start.column;
-            source = stmt.loc.source;
-        }
-        result = new sourceMap.SourceNode(line, column, source);
+        result = new Result(stmt);
 
         if (stmt.type === Syntax.BlockStatement && (!extra.comment || !stmt.leadingComments)) {
             result.add(' ');
@@ -376,7 +368,7 @@
             if (suffix) {
                 result.add(' ');
             }
-            return result;
+            return result.valueOf();
         }
 
         if (stmt.type === Syntax.EmptyStatement && (!extra.comment || !stmt.leadingComments)) {
@@ -385,26 +377,20 @@
             previousBase = base;
             base += indent;
             result.add('\n');
-            // SJC - removed addIndent
-            result.add(generateStatement(stmt));
+            result.add(addIndent(generateStatement(stmt)));
             base = previousBase;
         }
 
         if (suffix) {
             result.add('\n' + addIndent(''));
         }
-        return result;
+        return result.valueOf();
     }
 
     function generateFunctionBody(node) {
-        var i, len, line, column, source, result;
+        var i, len;
 
-        if (typeof node.loc !== 'undefined') {
-            line = stmt.loc.start.line;
-            column = stmt.loc.start.column;
-            source = stmt.loc.source;
-        }
-        result = new sourceMap.SourceNode(line, column, source);
+        var result = new Result(node);
 
         result.add('(');
         for (i = 0, len = node.params.length; i < len; i += 1) {
@@ -415,7 +401,7 @@
         }
         result.add(')');
         result.add(maybeBlock(node.body));
-        return result;
+        return result.valueOf();
     }
 
     function generateExpression(expr, option) {
@@ -767,30 +753,23 @@
         var i, len, previousBase, comment, save, ret, node, allowIn, sourceNode;
 
         // Create SourceNode for Source Map
-
-        var line = null;
-        var column = null;
-        var source = '';
-
-        if (typeof stmt.loc !== 'undefined') {
-            line = stmt.loc.start.line;
-            column = stmt.loc.start.column;
-            source = stmt.loc.source;
-        }
-        sourceNode = new sourceMap.SourceNode(line, column, source);
+        sourceNode = new Result(stmt);
 
         if (extra.comment) {
             if (stmt.leadingComments) {
                 for (i = 0, len = stmt.leadingComments.length; i < len; i += 1) {
                     comment = stmt.leadingComments[i];
                     ret = generateComment(comment);
-                    if (!endsWithLineTerminator(ret)) {
-                        ret += '\n';
-                    }
-                    if (i != 0) {
+                    if (i > 0) {
                         sourceNode.add(addIndent(ret));
+                    } else {
+                        sourceNode.add(ret);
+                    }
+                    if (!endsWithLineTerminator(ret)) {
+                        sourceNode.add('\n');
                     }
                 }
+                sourceNode.add(addIndent(''));
             }
         }
 
@@ -802,13 +781,12 @@
 
         switch (stmt.type) {
         case Syntax.BlockStatement:
-            sourceNode.add('{');
+            sourceNode.add('{\n');
 
             previousBase = base;
             base += indent;
             for (i = 0, len = stmt.body.length; i < len; i += 1) {
-                //SJC - removed addIndent
-                sourceNode.add(generateStatement(stmt.body[i]));
+                sourceNode.add(addIndent(generateStatement(stmt.body[i])));
                 sourceNode.add('\n');
             }
             base = previousBase;
@@ -918,10 +896,9 @@
                 node = stmt.declarations[0];
                 if (extra.comment && node.leadingComments) {
                     sourceNode.add('\n');
-                    // SJC - remove addIndent
-                    sourceNode.add(generateStatement(node, {
+                    sourceNode.add(addIndent(generateStatement(node, {
                         allowIn: allowIn
-                    }));
+                    })));
                 } else {
                     sourceNode.add(' ');
                     sourceNode.add(generateStatement(node, {
@@ -933,10 +910,9 @@
                     node = stmt.declarations[i];
                     if (extra.comment && node.leadingComments) {
                         sourceNode.add(',\n');
-                        // SJC - removed addIndent
-                        sourceNode.add(generateStatement(node, {
+                        sourceNode.add(addIndent(generateStatement(node, {
                             allowIn: allowIn
-                        }));
+                        })));
                     } else {
                         sourceNode.add(', ');
                         sourceNode.add(generateStatement(node, {
@@ -984,8 +960,7 @@
             base = previousBase;
             if (stmt.cases) {
                 for (i = 0, len = stmt.cases.length; i < len; i += 1) {
-                    //SJC - removed addIndent
-                    sourceNode.add(generateStatement(stmt.cases[i]))
+                    sourceNode.add(addIndent(generateStatement(stmt.cases[i])));
                     sourceNode.add('\n');
                 }
             }
@@ -1016,8 +991,7 @@
 
             for (; i < len; i += 1) {
                 sourceNode.add('\n');
-                //SJC - removed addIndent
-                sourceNode.add(generateStatement(stmt.consequent[i]));
+                sourceNode.add(addIndent(generateStatement(stmt.consequent[i])));
             }
 
             base = previousBase;
@@ -1160,8 +1134,7 @@
         case Syntax.Program:
             sourceNode.add('');
             for (i = 0, len = stmt.body.length; i < len; i += 1) {
-                //SJC - removed addIndent
-                sourceNode.add(generateStatement(stmt.body[i]));
+                sourceNode.add(addIndent(generateStatement(stmt.body[i])));
                 if ((i + 1) < len) {
                     sourceNode.add('\n');
                 }
@@ -1231,15 +1204,16 @@
             if (stmt.trailingComments) {
                 for (i = 0, len = stmt.trailingComments.length; i < len; i += 1) {
                     comment = stmt.trailingComments[i];
-                    if (!endsWithLineTerminator(sourceNode.toString())) {
+                    ret = generateComment(comment);
+                    sourceNode.add(addIndent(ret));
+                    if (!endsWithLineTerminator(ret)) {
                         sourceNode.add('\n');
                     }
-                    sourceNode.add(addIndent(generateComment(comment)));
                 }
             }
         }
 
-        return sourceNode;
+        return sourceNode.valueOf();
     }
 
     function generate(node, options) {
@@ -1272,6 +1246,37 @@
         }
         extra = options;
 
+        if (extra.sourceMap) {
+            Result = function (node) {
+                var line = null;
+                var column = null;
+                var source = '';
+
+                if (typeof node.loc !== 'undefined') {
+                    line = node.loc.start.line;
+                    column = node.loc.start.column;
+                    source = node.loc.source;
+                }
+                return new sourceMap.SourceNode(line, column, source);
+            }
+            Result.prototype.valueOf = function() {
+                    return this;
+            }
+        } else {
+            Result = function() {
+                this.string = '';
+            }
+            Result.prototype.add = function(jsString) {
+                this.string += jsString;
+            }
+            Result.prototype.valueOf = function() {
+                return this.string;
+            }
+            Result.prototype.toString = function() {
+                return this.string;
+            }
+        }
+
         switch (node.type) {
         case Syntax.BlockStatement:
         case Syntax.BreakStatement:
@@ -1296,11 +1301,7 @@
         case Syntax.VariableDeclarator:
         case Syntax.WhileStatement:
         case Syntax.WithStatement:
-            if (extra.sourceMap) {
-                return generateStatement(node);
-            } else {
-                return generateStatement(node).toString();
-            }
+            return generateStatement(node);
 
         case Syntax.AssignmentExpression:
         case Syntax.ArrayExpression:
