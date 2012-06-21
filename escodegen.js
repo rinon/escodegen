@@ -1,5 +1,6 @@
 /* -*- Mode: js; js-indent-level: 4; -*- */
 /*
+  Copyright (C) 2012 Stephen Crane <culda.rinon@gmail.com>
   Copyright (C) 2012 John Freeman <jfreeman08@gmail.com>
   Copyright (C) 2012 Ariya Hidayat <ariya.hidayat@gmail.com>
   Copyright (C) 2012 Mathias Bynens <mathias@qiwi.be>
@@ -297,10 +298,11 @@
     }
 
     function addIndent(stmt) {
-        if (extra.sourceMap) {
-            stmt.children.unshift(base);
-        } else if (typeof stmt === 'string') {
+        if (typeof stmt === 'string') {
             return base + stmt;
+        } else if (extra.sourceMap) {
+            stmt.prepend(base);
+            return stmt;
         } else {
             stmt.string = base + stmt.string;
             return stmt;
@@ -1255,12 +1257,14 @@
                 if (typeof node.loc !== 'undefined') {
                     line = node.loc.start.line;
                     column = node.loc.start.column;
-                    source = node.loc.source;
+                    //source = node.loc.source;
+                    source = extra.sourceFile;
+                    console.error("Creating SourceNode with: " + line + " " + column + " " + source);
                 }
-                return new sourceMap.SourceNode(line, column, source);
+                return new extra.sourceMap.SourceNode(line, column, source);
             }
             Result.prototype.valueOf = function() {
-                    return this;
+                return this;
             }
         } else {
             Result = function() {
@@ -1301,7 +1305,11 @@
         case Syntax.VariableDeclarator:
         case Syntax.WhileStatement:
         case Syntax.WithStatement:
-            return generateStatement(node);
+            if (extra.sourceMap) {
+                return generateStatement(node).toStringWithSourceMap({file:extra.sourceFile});
+            } else {
+                return generateStatement(node).valueOf();
+            }
 
         case Syntax.AssignmentExpression:
         case Syntax.ArrayExpression:
