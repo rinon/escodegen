@@ -354,7 +354,16 @@
 
     function parenthesize(text, current, should) {
         if (current < should) {
-            return '(' + text + ')';
+            if (typeof text === 'string') {
+                return '(' + text + ')';
+            } else if (extra.sourceMap) {
+                text.prepend('(');
+                text.add(')');
+                return text;
+            } else {
+                text.string = '(' + text.string + ')';
+                return text;
+            }
         }
         return text;
     }
@@ -413,18 +422,20 @@
         allowIn = option.allowIn;
         allowCall = option.allowCall;
 
+        result = new Result(expr);
+
         switch (expr.type) {
         case Syntax.SequenceExpression:
-            result = '';
+            result.add('');
             allowIn |= (Precedence.Sequence < precedence);
             for (i = 0, len = expr.expressions.length; i < len; i += 1) {
-                result += generateExpression(expr.expressions[i], {
+                result.add(generateExpression(expr.expressions[i], {
                     precedence: Precedence.Assignment,
                     allowIn: allowIn,
                     allowCall: true
-                });
+                }));
                 if ((i + 1) < len) {
-                    result += ', ';
+                    result.add(', ');
                 }
             }
             result = parenthesize(result, Precedence.Sequence, precedence);
@@ -432,43 +443,40 @@
 
         case Syntax.AssignmentExpression:
             allowIn |= (Precedence.Assignment < precedence);
-            result = parenthesize(
-                generateExpression(expr.left, {
-                    precedence: Precedence.Call,
-                    allowIn: allowIn,
-                    allowCall: true
-                }) + ' ' + expr.operator + ' ' +
-                    generateExpression(expr.right, {
-                        precedence: Precedence.Assignment,
-                        allowIn: allowIn,
-                        allowCall: true
-                    }),
-                Precedence.Assignment,
-                precedence
-            );
+            result.add(generateExpression(expr.left, {
+                precedence: Precedence.Call,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result.add(' ' + expr.operator + ' ');
+            result.add(generateExpression(expr.right, {
+                precedence: Precedence.Assignment,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result = parenthesize(result, Precedence.Assignment, precedence);
             break;
 
         case Syntax.ConditionalExpression:
             allowIn |= (Precedence.Conditional < precedence);
-            result = parenthesize(
-                generateExpression(expr.test, {
-                    precedence: Precedence.LogicalOR,
-                    allowIn: allowIn,
-                    allowCall: true
-                }) + ' ? ' +
-                    generateExpression(expr.consequent, {
-                        precedence: Precedence.Assignment,
-                        allowIn: allowIn,
-                        allowCall: true
-                    }) + ' : ' +
-                    generateExpression(expr.alternate, {
-                        precedence: Precedence.Assignment,
-                        allowIn: allowIn,
-                        allowCall: true
-                    }),
-                Precedence.Conditional,
-                precedence
-            );
+            result.add(generateExpression(expr.test, {
+                precedence: Precedence.LogicalOR,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result.add(' ? ');
+            result.add(generateExpression(expr.consequent, {
+                precedence: Precedence.Assignment,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result.add(' : ');
+            result.add(generateExpression(expr.alternate, {
+                precedence: Precedence.Assignment,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result = parenthesize(result, Precedence.Conditional, precedence);
             break;
 
         case Syntax.LogicalExpression:
@@ -477,20 +485,20 @@
 
             allowIn |= (currentPrecedence < precedence);
 
-            result =
-                generateExpression(expr.left, {
-                    precedence: currentPrecedence,
-                    allowIn: allowIn,
-                    allowCall: true
-                }) + ' ' + expr.operator + ' ' +
-                generateExpression(expr.right, {
-                    precedence: currentPrecedence + 1,
-                    allowIn: allowIn,
-                    allowCall: true
-                });
+            result.add(generateExpression(expr.left, {
+                precedence: currentPrecedence,
+                allowIn: allowIn,
+                allowCall: true
+            }));
+            result.add(' ' + expr.operator + ' ');
+            result.add(generateExpression(expr.right, {
+                precedence: currentPrecedence + 1,
+                allowIn: allowIn,
+                allowCall: true
+            }));
 
             if (expr.operator === 'in' && !allowIn) {
-                result = '(' + result + ')';
+                result = parenthesize(result, 0, 1);
             } else {
                 result = parenthesize(result, currentPrecedence, precedence);
             }
@@ -498,213 +506,212 @@
             break;
 
         case Syntax.CallExpression:
-            result = generateExpression(expr.callee, {
+            result.add(generateExpression(expr.callee, {
                 precedence: Precedence.Call,
                 allowIn: true,
                 allowCall: true
-            });
+            }));
 
-            result += '(';
+            result.add('(');
             for (i = 0, len = expr['arguments'].length; i < len; i += 1) {
-                result += generateExpression(expr['arguments'][i], {
+                result.add(generateExpression(expr['arguments'][i], {
                     precedence: Precedence.Assignment,
                     allowIn: true,
                     allowCall: true
-                });
+                }));
                 if ((i + 1) < len) {
-                    result += ', ';
+                    result.add(', ');
                 }
             }
-            result += ')';
+            result.add(')');
 
             if (!allowCall) {
-                result = '(' + result + ')';
+                result = parenthesize(result, 0, 1);
             } else {
                 result = parenthesize(result, Precedence.Call, precedence);
             }
             break;
 
         case Syntax.NewExpression:
-            result = 'new ' + generateExpression(expr.callee, {
+            result.add('new ');
+            result.add(generateExpression(expr.callee, {
                 precedence: Precedence.New,
                 allowIn: true,
                 allowCall: false
-            });
+            }));
 
-            result += '(';
+            result.add('(');
             for (i = 0, len = expr['arguments'].length; i < len; i += 1) {
-                result += generateExpression(expr['arguments'][i], {
+                result.add(generateExpression(expr['arguments'][i], {
                     precedence: Precedence.Assignment,
                     allowIn: true,
                     allowCall: true
-                });
+                }));
                 if ((i + 1) < len) {
-                    result += ', ';
+                    result.add(', ');
                 }
             }
-            result += ')';
+            result.add(')');
 
             result = parenthesize(result, Precedence.New, precedence);
             break;
 
         case Syntax.MemberExpression:
-            result = generateExpression(expr.object, {
+            result.add(generateExpression(expr.object, {
                 precedence: Precedence.Call,
                 allowIn: true,
                 allowCall: allowCall
-            });
+            }));
 
             if (expr.computed) {
-                result += '[' + generateExpression(expr.property, {
+                result.add('[');
+                result.add(generateExpression(expr.property, {
                     precedence: Precedence.Sequence,
                     allowIn: true,
                     allowCall: allowCall
-                }) + ']';
+                }));
+                result.add(']');
             } else {
                 if (expr.object.type === Syntax.Literal && typeof expr.object.value === 'number') {
-                    if (result.indexOf('.') < 0) {
-                        if (!/[eExX]/.test(result) && !(result.length >= 2 && result[0] === '0')) {
-                            result += '.';
+                    var resultString = result.toString();
+                    if (resultString.indexOf('.') < 0) {
+                        if (!/[eExX]/.test(resultString) && !(resultString.length >= 2 && resultString[0] === '0')) {
+                            result.add('.');
                         }
                     }
                 }
-                result += '.' + expr.property.name;
+                result.add('.' + expr.property.name);
             }
 
             result = parenthesize(result, Precedence.Member, precedence);
             break;
 
         case Syntax.UnaryExpression:
-            result = expr.operator;
-            if (result.length > 2) {
-                result += ' ';
+            result.add(expr.operator);
+            if (result.toString().length > 2) {
+                result.add(' ');
             }
-            result = parenthesize(
-                result + generateExpression(expr.argument, {
-                    precedence: Precedence.Unary + (
-                        expr.argument.type === Syntax.UnaryExpression &&
-                            expr.operator.length < 3 &&
-                            expr.argument.operator === expr.operator ? 1 : 0
-                    ),
-                    allowIn: true,
-                    allowCall: true
-                }),
-                Precedence.Unary,
-                precedence
-            );
+            result.add(generateExpression(expr.argument, {
+                precedence: Precedence.Unary + (
+                    expr.argument.type === Syntax.UnaryExpression &&
+                        expr.operator.length < 3 &&
+                        expr.argument.operator === expr.operator ? 1 : 0
+                ),
+                allowIn: true,
+                allowCall: true
+            }));
+            result = parenthesize(result, Precedence.Unary, precedence);
             break;
 
         case Syntax.UpdateExpression:
             if (expr.prefix) {
-                result = parenthesize(
-                    expr.operator +
-                        generateExpression(expr.argument, {
-                            precedence: Precedence.Unary,
-                            allowIn: true,
-                            allowCall: true
-                        }),
-                    Precedence.Unary,
-                    precedence
-                );
+                result.add(expr.operator);
+                result.add(generateExpression(expr.argument, {
+                    precedence: Precedence.Unary,
+                    allowIn: true,
+                    allowCall: true
+                }));
+                result = parenthesize(result, Precedence.Unary, precedence);
             } else {
-                result = parenthesize(
-                    generateExpression(expr.argument, {
-                        precedence: Precedence.Postfix,
-                        allowIn: true,
-                        allowCall: true
-                    }) + expr.operator,
-                    Precedence.Postfix,
-                    precedence
-                );
+                result.add(generateExpression(expr.argument, {
+                    precedence: Precedence.Unary,
+                    allowIn: true,
+                    allowCall: true
+                }));
+                result.add(expr.operator);
+                result = parenthesize(result, Precedence.Postfix, precedence);
             }
             break;
 
         case Syntax.FunctionExpression:
-            result = 'function ';
+            result.add('function ');
             if (expr.id) {
-                result += expr.id.name;
+                result.add(expr.id.name);
             }
-            result += generateFunctionBody(expr);
+            result.add(generateFunctionBody(expr));
             break;
 
         case Syntax.ArrayExpression:
             if (!expr.elements.length) {
-                result = '[]';
+                result.add('[]');
                 break;
             }
-            result = '[\n';
+            result.add('[\n');
             previousBase = base;
             base += indent;
             for (i = 0, len = expr.elements.length; i < len; i += 1) {
                 if (!expr.elements[i]) {
-                    result += addIndent('');
+                    result.add(addIndent(''));
                     if ((i + 1) === len) {
-                        result += ',';
+                        result.add(',');
                     }
                 } else {
-                    result += addIndent(generateExpression(expr.elements[i], {
+                    result.add(addIndent(generateExpression(expr.elements[i], {
                         precedence: Precedence.Assignment,
                         allowIn: true,
                         allowCall: true
-                    }));
+                    })));
                 }
                 if ((i + 1) < len) {
-                    result += ',\n';
+                    result.add(',\n');
                 }
             }
             base = previousBase;
-            result += '\n' + addIndent(']');
+            result.add('\n' + addIndent(']'));
             break;
 
         case Syntax.Property:
             if (expr.kind === 'get' || expr.kind === 'set') {
-                result = expr.kind + ' ' + generateExpression(expr.key, {
+                result.add(expr.kind + ' ');
+                result.add(generateExpression(expr.key, {
                     precedence: Precedence.Sequence,
                     allowIn: true,
                     allowCall: true
-                }) + generateFunctionBody(expr.value);
+                }));
+                result.add(generateFunctionBody(expr.value));
             } else {
-                result =
-                    generateExpression(expr.key, {
-                        precedence: Precedence.Sequence,
-                        allowIn: true,
-                        allowCall: true
-                    }) + ': ' + generateExpression(expr.value, {
-                        precedence: Precedence.Assignment,
-                        allowIn: true,
-                        allowCall: true
-                    });
+                result.add(generateExpression(expr.key, {
+                    precedence: Precedence.Sequence,
+                    allowIn: true,
+                    allowCall: true
+                }));
+                result.add(': ');
+                result.add(generateExpression(expr.value, {
+                    precedence: Precedence.Assignment,
+                    allowIn: true,
+                    allowCall: true
+                }));
             }
             break;
 
         case Syntax.ObjectExpression:
             if (!expr.properties.length) {
-                result = '{}';
+                result.add('{}');
                 break;
             }
-            result = '{\n';
+            result.add('{\n');
             previousBase = base;
             base += indent;
             for (i = 0, len = expr.properties.length; i < len; i += 1) {
-                result += addIndent(generateExpression(expr.properties[i], {
+                result.add(addIndent(generateExpression(expr.properties[i], {
                     precedence: Precedence.Sequence,
                     allowIn: true,
                     allowCall: true
-                }));
+                })));
                 if ((i + 1) < len) {
-                    result += ',\n';
+                    result.add(',\n');
                 }
             }
             base = previousBase;
-            result += '\n' + addIndent('}');
+            result.add('\n' + addIndent('}'));
             break;
 
         case Syntax.ThisExpression:
-            result = 'this';
+            result.add('this');
             break;
 
         case Syntax.Identifier:
-            result = expr.name;
+            result.add(expr.name);
             break;
 
         case Syntax.Literal:
@@ -713,7 +720,7 @@
                     raw = parse(expr.raw).body[0].expression;
                     if (raw.type === Syntax.Literal) {
                         if (raw.value === expr.value) {
-                            result = expr.raw;
+                            result.add(expr.raw);
                             break;
                         }
                     }
@@ -723,30 +730,27 @@
             }
 
             if (expr.value === null) {
-                result = 'null';
+                result.add('null');
                 break;
             }
 
             if (typeof expr.value === 'string') {
-                result = escapeString(expr.value);
+                result.add(escapeString(expr.value));
                 break;
             }
 
             if (typeof expr.value === 'number' && expr.value === Infinity) {
                 // Infinity is variable
-                result = '1e+1000';
+                result.add('1e+1000');
                 break;
             }
 
-            result = expr.value.toString();
+            result.add(expr.value.toString());
             break;
 
         default:
-            break;
-        }
-
-        if (result === undefined) {
             throw new Error('Unknown expression type: ' + expr.type);
+            break;
         }
         return result;
     }
@@ -854,7 +858,7 @@
             });
             // 12.4 '{', 'function' is not allowed in this position.
             // wrap espression with parentheses
-            if (ret[0] === '{' || ret.indexOf('function ') === 0) {
+            if (ret.toString()[0] === '{' || ret.toString().indexOf('function ') === 0) {
                 sourceNode.add('(');
                 sourceNode.add(ret);
                 sourceNode.add(');');
@@ -1258,8 +1262,7 @@
                     line = node.loc.start.line;
                     column = node.loc.start.column;
                     //source = node.loc.source;
-                    source = extra.sourceFile;
-                    console.error("Creating SourceNode with: " + line + " " + column + " " + source);
+                    source = node.loc.source || extra.sourceFile;
                 }
                 return new extra.sourceMap.SourceNode(line, column, source);
             }
@@ -1305,11 +1308,7 @@
         case Syntax.VariableDeclarator:
         case Syntax.WhileStatement:
         case Syntax.WithStatement:
-            if (extra.sourceMap) {
-                return generateStatement(node).toStringWithSourceMap({file:extra.sourceFile});
-            } else {
-                return generateStatement(node).valueOf();
-            }
+            return generateStatement(node).valueOf();
 
         case Syntax.AssignmentExpression:
         case Syntax.ArrayExpression:
@@ -1332,7 +1331,7 @@
                 precedence: Precedence.Sequence,
                 allowIn: true,
                 allowCall: true
-            });
+            }).valueOf();
 
         default:
             break;
